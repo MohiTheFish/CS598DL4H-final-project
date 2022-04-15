@@ -145,17 +145,22 @@ if __name__ == '__main__':
 		newSeqs_3digit.append(newPatient)
 
 
-	print('Converting strSeqs to intSeqs, and making types for 3digit ICD9 code')
-	hfs = { p:False for p in pids }
+	print('Converting to hfs')
+	setpids = set(pids)
+	hfMapping = { p:False for p in pids }
 	infd = open(diagnosisFile, 'r')
 	infd.readline()
 	for line in infd:
 		tokens = line.strip().split(',')
 		subjectId = int(tokens[1])
 
-		if convert_to_icd9(tokens[4][1:-1]).startswith('428'):
-			hfs[subjectId] = True
+		if subjectId in setpids and convert_to_icd9(tokens[4][1:-1]).startswith('428'):
+			hfMapping[subjectId] = True
 	infd.close()
+
+	hfs = []
+	for p in pids:
+		hfs.append(hfMapping[p])
 
 	pickle.dump(pids, open(outFile+'.pids', 'wb'), -1)
 	pickle.dump(hfs, open(outFile+'.hfs', 'wb'), -1)
