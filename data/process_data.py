@@ -1,5 +1,5 @@
 import sys
-import cPickle as pickle
+import pickle
 from datetime import datetime
 
 def convert_to_icd9(dxStr):
@@ -79,7 +79,7 @@ if __name__ == '__main__':
 	print('Building pid-sortedVisits mapping')
 	pidSeqMap = {}
 	pidSeqMap_3digit = {}
-	for pid, admIdList in pidAdmMap.iteritems():
+	for pid, admIdList in pidAdmMap.items():
 		if len(admIdList) < 2: continue
 
 		sortedList = sorted([(admDateMap[admId], admDxMap[admId]) for admId in admIdList])
@@ -93,7 +93,7 @@ if __name__ == '__main__':
 	dates = []
 	seqs = []
 	morts = []
-	for pid, visits in pidSeqMap.iteritems():
+	for pid, visits in pidSeqMap.items():
 		pids.append(pid)
 		morts.append(pidDodMap[pid])
 		seq = []
@@ -106,7 +106,7 @@ if __name__ == '__main__':
 	
 	print('Building pids, dates, strSeqs for 3digit ICD9 code')
 	seqs_3digit = []
-	for pid, visits in pidSeqMap_3digit.iteritems():
+	for pid, visits in pidSeqMap_3digit.items():
 		seq = []
 		for visit in visits:
 			seq.append(visit[1])
