@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Ignore anything in the data folder but not the procss_data.
+data/**
+!data/process_data.py
