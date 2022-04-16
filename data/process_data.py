@@ -21,6 +21,24 @@ def convert_to_3digit_icd9(dxStr):
 		if len(dxStr) > 3: return dxStr[:3]
 		else: return dxStr
 
+def getOrderedPatientsInfo(patientInfos):
+	types = {}
+	newPatientInfos = []
+	for patient in patientInfos:
+		newPatient = []
+		for visit in patient:
+			newVisit = []
+			for code in set(visit):
+				if code in types:
+					newVisit.append(types[code])
+				else:
+					types[code] = len(types)
+					newVisit.append(types[code])
+			newPatient.append(newVisit)
+		newPatientInfos.append(newPatient)
+	return types, newPatientInfos
+
+
 def parse_arguments(parser):
 	"""Read user arguments"""
 	parser.add_argument(
@@ -112,7 +130,7 @@ if __name__ == '__main__':
 
 		admPrescriptionMap[admId].append(prescriptionStr)
 		uniquePrescriptions.add(prescriptionStr)
-	print(len(uniquePrescriptions))
+	numUniquePrescriptions = len(uniquePrescriptions)
 
 	print('Building pid-sortedVisits mapping')
 	pidSeqMap = {}
@@ -130,17 +148,21 @@ if __name__ == '__main__':
 	pids = []
 	dates = []
 	seqs = []
+	prescriptions = []
 	morts = []
 	for pid, visits in pidSeqMap.items():
 		pids.append(pid)
 		morts.append(pidDodMap[pid])
 		seq = []
 		date = []
+		prescription = []
 		for visit in visits:
 			date.append(visit[0])
 			seq.append(visit[1])
+			prescription.append(visit[2])
 		dates.append(date)
 		seqs.append(seq)
+		prescriptions.append(prescription)
 	
 	print('Building pids, dates, strSeqs for 3digit ICD9 code')
 	seqs_3digit = []
@@ -150,45 +172,21 @@ if __name__ == '__main__':
 			seq.append(visit[1])
 		seqs_3digit.append(seq)
 	
-	print('Converting strSeqs to intSeqs, and making types')
-	types = {}
-	newSeqs = []
-	for patient in seqs:
-		newPatient = []
-		for visit in patient:
-			newVisit = []
-			for code in visit:
-				if code in types:
-					newVisit.append(types[code])
-				else:
-					types[code] = len(types)
-					newVisit.append(types[code])
-			newPatient.append(newVisit)
-		newSeqs.append(newPatient)
-	
 	print('Converting strSeqs to intSeqs, and making types for 3digit ICD9 code')
-	types_3digit = {}
-	newSeqs_3digit = []
-	for patient in seqs_3digit:
-		newPatient = []
-		for visit in patient:
-			newVisit = []
-			for code in set(visit):
-				if code in types_3digit:
-					newVisit.append(types_3digit[code])
-				else:
-					types_3digit[code] = len(types_3digit)
-					newVisit.append(types_3digit[code])
-			newPatient.append(newVisit)
-		newSeqs_3digit.append(newPatient)
+	types_3digit, newSeqs_3digit = getOrderedPatientsInfo(seqs_3digit)
 
+	print('Converting prescriptions to something, and making types')
+	types_prescriptions, newPrescriptions = getOrderedPatientsInfo(prescriptions)
+
+	print()
+	print(f'numUniquePrescriptions: {numUniquePrescriptions}')
 	if not os.path.isdir(outDir):
 		os.mkdir(outDir)
 	
 	pickle.dump(pids, open(outDir+'pids.pkl', 'wb'), -1)
 	pickle.dump(dates, open(outDir+'dates.pkl', 'wb'), -1)
 	pickle.dump(morts, open(outDir+'morts.pkl', 'wb'), -1)
-	pickle.dump(newSeqs, open(outDir+'seqs.pkl', 'wb'), -1)
-	pickle.dump(types, open(outDir+'types.pkl', 'wb'), -1)
 	pickle.dump(newSeqs_3digit, open(outDir+'3digitICD9.seqs.pkl', 'wb'), -1)
 	pickle.dump(types_3digit, open(outDir+'3digitICD9.types.pkl', 'wb'), -1)
+	pickle.dump(newPrescriptions, open(outDir+'prescriptions.pkl', 'wb'), -1)
+	pickle.dump(types_prescriptions, open(outDir+'prescriptions.types.pkl', 'wb'), -1)
