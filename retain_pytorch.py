@@ -1,4 +1,3 @@
-# Credit to: https://github.com/easyfan327/Pytorch-RETAIN
 # -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
@@ -10,7 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 import pickle as pickle
 import random
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
 
 class RetainNN(nn.Module):
@@ -124,7 +123,7 @@ def init_params(params: dict):
     params["output_dropout_p"] = 0.8
 
     params["batch_size"] = 100
-    params["n_epoches"] = 100
+    params["n_epoches"] = 30
 
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
@@ -148,7 +147,6 @@ def padMatrixWithoutTime(seqs, options):
     for idx, seq in enumerate(seqs):
         for xvec, subseq in zip(x[:, idx, :], seq):
             xvec[subseq] = 1.
-
     return x, lengths
 
 
@@ -226,7 +224,7 @@ if __name__ == "__main__":
             xbpad, xbpad_lengths = padMatrixWithoutTime(seqs=xb, options=parameters)
             xbpadtensor = torch.from_numpy(xbpad).float().to(device)
             ybtensor = torch.from_numpy(np.array(yb)).long().to(device)
-            #print(xbpadtensor.shape)
+            # print(xbpadtensor.shape)
             var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(xbpadtensor.shape[1])
 
             pred, var_rnn_hidden_init, visit_rnn_hidden_init = model(xbpadtensor, var_rnn_hidden_init, visit_rnn_hidden_init)
@@ -260,15 +258,23 @@ if __name__ == "__main__":
         y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
         y_true = y_true.unsqueeze(1)
         y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
-        test_auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
+        y_true = y_true_oh.detach().cpu().numpy()
+        y_pred = y_hat.detach().cpu().numpy()
+        test_auc = roc_auc_score(y_true=y_true, y_score=y_pred)
 
         if test_auc > best_test_auc:
             best_test_auc = test_auc
             best_epoch = epoch
 
-        print("{},{},{},{}".format(epoch, torch.mean(loss_vector), auc, test_auc))
+        y_pred[y_pred > 0.5] = 1
+        y_pred[y_pred <= 0.5] = 0
+        y_pred = y_pred.astype(np.int32)
+        y_true = y_true.astype(np.int32)
+        p = precision_score(y_true, y_pred, average='micro')
+        r = recall_score(y_true, y_pred, average='micro')
+        f = f1_score(y_true, y_pred, average='micro')
+        print("{},{:.4f},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), auc, test_auc,p,r,f))
 
-    # print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
     """
     model.eval()
     x, x_length = padMatrixWithoutTime(seqs=test_set_x, options=parameters)
