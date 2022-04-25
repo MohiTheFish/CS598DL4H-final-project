@@ -28,9 +28,20 @@ def parse_arguments(parser):
         "--labels_file", type=str, default='morts.pkl', help="PRESCRIPTIONS data file"
     )
     parser.add_argument(
-        "--epochs", type=int, default=25, help="Number of epochs to run for"
+        "--epochs", type=int, default=10, help="Number of epochs to run for"
+    )
+    parser.add_argument(
+        "--save_model", type=str, help="Output path to save the trained model parameters to.", metavar='OUTPUT_PATH'
+    )
+    parser.add_argument(
+        "--load_model", type=str, 
+        metavar='MODEL_PATH',
+        help="You can load an existing saved model by providing the path to the model parameters. Only the evaluation will occur if this is provided"
     )
     args = parser.parse_args()
+
+    if args.save_model and args.load_model:
+        raise AttributeError('Load and Save model should not both be provided')
 
     return args
 
@@ -163,13 +174,20 @@ def init_params(args):
 
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
+
+    # Add all the command line args to this params dict
+    for arg in vars(args):
+        params[arg] = getattr(args, arg)
     
+    # Override all of the files with the prefix 
     if not args.data_dir.endswith("/"):
         args.data_dir += "/"
     params["diagnoses_file"] = args.data_dir+args.diagnoses_file
     params["labels_file"] = args.data_dir+args.labels_file
     params["prescriptions_file"] = args.data_dir+args.prescriptions_file
 
+    # This shouldn't ever be directly used
+    del params["data_dir"]
     return params
 
 def padMatrixWithoutTime(data, max_codes):
@@ -275,8 +293,7 @@ if __name__ == "__main__":
     PARSER = argparse.ArgumentParser(
 		formatter_class=argparse.ArgumentDefaultsHelpFormatter
 	)
-    args = parse_arguments(PARSER)
-    params = init_params(args)
+    params = init_params(parse_arguments(PARSER))
     train_set_x, train_set_y, _, _, test_set_x, test_set_y = init_data(params)
 
     model = CoamNN(params=params).to(device)
@@ -289,23 +306,31 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=.0001)
     loss_fn = torch.nn.CrossEntropyLoss()
 
-    print()
-    print('Begin training')
-    params["n_batches"] = int(np.ceil(float(len(train_set_y)) / float(params["batch_size"])))
-    best_test_auc = 0
-    best_epoch = 0
-    for epoch in range(params["n_epochs"]):
-        model.train()
-        loss_vector = trainModel(model, train_set_x, train_set_y, optimizer=optimizer, loss_fn=loss_fn, params=params)
-
+    if params["load_model"]: # If loading a model
+        print('Evaluating Model')
+        model.load_state_dict(torch.load(params["load_model"]))
         model.eval()
-        # evalModel(model, valid_set_x)
         test_auc, p, r, f = evalModel(model, test_set_x, test_set_y)
+        print("{:.4f}, \t {:.4f},{:.4f},{:.4f}".format(test_auc, p,r,f))
+    else: # If training a model
+        print('Begin training')
+        params["n_batches"] = int(np.ceil(float(len(train_set_y)) / float(params["batch_size"])))
+        best_test_auc = 0
+        best_epoch = 0
+        for epoch in range(params["n_epochs"]):
+            model.train()
+            loss_vector = trainModel(model, train_set_x, train_set_y, optimizer=optimizer, loss_fn=loss_fn, params=params)
 
-        if test_auc > best_test_auc:
-            best_test_auc = test_auc
-            best_epoch = epoch
+            model.eval()
+            # evalModel(model, valid_set_x)
+            test_auc, p, r, f = evalModel(model, test_set_x, test_set_y)
 
-        print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), test_auc, p,r,f))
+            if test_auc > best_test_auc:
+                best_test_auc = test_auc
+                best_epoch = epoch
 
-    print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
+            print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), test_auc, p,r,f))
+
+        if params["save_model"]:
+            torch.save(model.state_dict(), params["save_model"])
+        print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
