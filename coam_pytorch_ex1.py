@@ -64,7 +64,7 @@ class RetainNN(nn.Module):
         """
         #self.emb_layer = nn.Embedding(num_embeddings=params["num_embeddings"], embedding_dim=params["embedding_dim"])
         self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=256)
-        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescriptions_codes"], out_features=256)
+        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=256)
         
         self.dropout = nn.Dropout(params["dropout_p"])
 
@@ -235,8 +235,8 @@ def init_data(params: dict):
 
 def evalModel(model, set_x, set_y):
     xDiagnoses, xPrescriptions = separateData(set_x)
-    xDiagnoses = xToTensor(xDiagnoses, parameters['num_embeddings_diagnoses'])
-    xPrescriptions = xToTensor(xPrescriptions, parameters['num_embeddings_prescriptions'])
+    xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
+    xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
     y_true = yToTensor(set_y)
     diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape)
     pred = model(xDiagnoses, xPrescriptions, diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init)
@@ -294,8 +294,8 @@ if __name__ == "__main__":
             xDiagnoses, xPrescriptions = separateData(train_set_x[lIndex:rIndex])
             y = train_set_y[lIndex:rIndex]
 
-            xDiagnoses = xToTensor(xDiagnoses, parameters['num_embeddings_diagnoses'])
-            xPrescriptions = xToTensor(xPrescriptions, parameters['num_embeddings_prescriptions'])
+            xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
+            xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
             y = yToTensor(y)
             
             # print('xDiagnoss.shape:', xDiagnoses.shape)
