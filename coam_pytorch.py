@@ -14,25 +14,25 @@ from torch.utils.data import Dataset
 
 
 def parse_arguments(parser):
-	"""Read user arguments"""
-	parser.add_argument(
-		"--data_dir", type=str, default='data/processed_data/', help="Directory for processed MIMIC-III data. This gets prefixed to all of the other file names."
-	)
-	parser.add_argument(
-		"--diagnoses_file", type=str, default='3digitICD9.seqs.pkl', help="processed DIAGNOSES data file"
-	)
-	parser.add_argument(
-		"--prescriptions_file", type=str, default='prescriptions.pkl', help="processed PRESCRIPTIONS data file"
-	)
-	parser.add_argument(
-		"--labels_file", type=str, default='morts.pkl', help="PRESCRIPTIONS data file"
-	)
-	parser.add_argument(
-		"--epochs", type=int, default=25, help="Number of epochs to run for"
-	)
-	args = parser.parse_args()
+    """Read user arguments"""
+    parser.add_argument(
+        "--data_dir", type=str, default='data/processed_data/', help="Directory for processed MIMIC-III data. This gets prefixed to all of the other file names."
+    )
+    parser.add_argument(
+        "--diagnoses_file", type=str, default='3digitICD9.seqs.pkl', help="processed DIAGNOSES data file"
+    )
+    parser.add_argument(
+        "--prescriptions_file", type=str, default='prescriptions.pkl', help="processed PRESCRIPTIONS data file"
+    )
+    parser.add_argument(
+        "--labels_file", type=str, default='morts.pkl', help="PRESCRIPTIONS data file"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=25, help="Number of epochs to run for"
+    )
+    args = parser.parse_args()
 
-	return args
+    return args
 
 class CustomDataset(Dataset):
     def __init__(self, diagnoses, prescriptions, labels):
@@ -114,7 +114,6 @@ class CoamNN(nn.Module):
         d = self.dropout(d)
         p = self.dropout(p)
 
-        # Intialize the hidden vectors to 0.
         d_rnn_output, _ = self.diagnoses_rnn(d)
         p_rnn_output, _ = self.prescriptions_rnn(p)
         # print(d_rnn_output.shape, p_rnn_output.shape)
@@ -241,6 +240,7 @@ def evalModel(model, set_x, set_y):
     
     y_pred[y_pred > 0.5] = 1
     y_pred[y_pred <= 0.5] = 0
+    y_pred = np.floor(y_pred + 0.5)
     y_pred = y_pred.astype(np.int32)
     y_true = y_true.astype(np.int32)
     p, r, f, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
