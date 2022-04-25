@@ -52,14 +52,15 @@ We recommend saving the files to the following directory
 ```
 data/mimic-iii-clinical-database-1.4
 ```
+### **Note:** We have setup the .gitignore to ignore any files added to the `data` directory other than `process_data.py`. Patient information is highly confidential, and, in an effort to protect the patients' data, we highly recommend using the data directory wherever you are unsure if the information is confidential.
 
-Once you have the data in the above directory, you can run our `process_data` script
-```
+Once you have the data in the above directory, you can run our `process_data` script*
+```bash
 cd data
 python process_data.py [--mimic_dir MIMIC_DIR] [--out_dir OUTPUT_DIR]
-cd ..
+cd .. # Return to root
 ```
-If you saved the MIMIC-III data to something other than the above directory, you must specify it with the `--mimic_dir` command. 
+If you saved the MIMIC-III data to something other than the above directory, you must specify it with the `--mimic_dir` command.
 
 You'll notice that there is a new directory
 ```
@@ -67,7 +68,7 @@ data/processed_data
 ```
 This has all of the preprocessed data that we used. 
 
-## Building the Model
+## Building our Model
 You can build and train the model and have it be evaluated by simply running 
 ```bash
 python coam_pytorch.py [--save_model OUTPUT_PATH]
@@ -78,4 +79,16 @@ python coam_pytorch.py [--load_model MODEL_PATH]
 ```
 If this arg is specified, there will be no training done, and the existing model wil *only* be evaluated.
 
-https://github.com/easyfan327/Pytorch-RETAIN
+
+## Other Baseline Model
+Our baseline model is a pytorch implementation of RETAIN. Credit goes to https://github.com/easyfan327/Pytorch-RETAIN. You can run this model with
+```cmd
+python retain_pytorch.py
+```
+
+
+## References/Credits
+https://github.com/easyfan327/Pytorch-RETAIN - The baseline model, and also the base for our COAM model.
+
+
+https://github.com/mp2893/retain - The original RETAIN implemented by the authors of the original RETAIN paper. We used the `process_mimic.py` to process the MIMIC-III dataset.
