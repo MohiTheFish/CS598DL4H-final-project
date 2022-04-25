@@ -4,6 +4,7 @@ import argparse
 import pickle
 from datetime import datetime
 from collections import defaultdict
+from sklearn.model_selection import train_test_split
 
 def convert_to_icd9(dxStr):
 	if dxStr.startswith('E'):
@@ -42,7 +43,7 @@ def getOrderedPatientsInfo(patientInfos):
 def parse_arguments(parser):
 	"""Read user arguments"""
 	parser.add_argument(
-		"--mimic_dir", type=str, default='mimic-iii-clinical-database-1.4/', help="Directory for MIMIC-III data"
+		"--mimic_dir", type=str, default='mimic-iii-clinical-database-1.4/', help="Directory for MIMIC-III data. This gets prefixed to all of the other file names."
 	)
 	parser.add_argument(
 		"--admission_file", type=str, default='ADMISSIONS.csv', help="ADMISSIONS data file"
@@ -104,6 +105,8 @@ if __name__ == '__main__':
 	infd.close()
 
 	print('Building admission-dxList mapping')
+	uniqueMedicalCodes = set()
+	uniqueMedicalCodes3Digits = set()
 	admDxMap = defaultdict(list)
 	admDxMap_3digit = defaultdict(list)
 	infd = open(diagnosisFile, 'r')
@@ -116,6 +119,8 @@ if __name__ == '__main__':
 
 		admDxMap[admId].append(dxStr)
 		admDxMap_3digit[admId].append(dxStr_3digit)
+		uniqueMedicalCodes.add(dxStr)
+		uniqueMedicalCodes3Digits.add(dxStr_3digit)
 	infd.close()
 
 	print('Building admission-prescription mapping')
@@ -190,3 +195,28 @@ if __name__ == '__main__':
 	pickle.dump(types_3digit, open(outDir+'3digitICD9.types.pkl', 'wb'), -1)
 	pickle.dump(newPrescriptions, open(outDir+'prescriptions.pkl', 'wb'), -1)
 	pickle.dump(types_prescriptions, open(outDir+'prescriptions.types.pkl', 'wb'), -1)
+
+	print('creating test splits')
+	x_data = newSeqs_3digit
+	# x_data = [(newSeqs_3digit[i], newPrescriptions[i]) for i in range(len(newSeqs_3digit))]
+	y_data = morts
+	# set aside 20% of train and test data for evaluation
+	X_train, X_test, y_train, y_test = train_test_split(x_data, y_data,
+		test_size=0.1, shuffle = True, random_state = 8)
+
+	# Use the same function above for the validation set
+	X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, 
+		test_size=0.11111, random_state= 8)
+
+	def len_argsort(seq):
+		return sorted(range(len(seq)), key=lambda x: len(seq[x]))
+	train_indices = len_argsort(X_train)
+	X_train = [X_train[i] for i in train_indices]
+	y_train = [y_train[i] for i in train_indices]
+
+	pickle.dump(X_train, open(outDir+'train.seqs', 'wb'), -1)
+	pickle.dump(X_test, open(outDir+'test.seqs', 'wb'), -1)
+	pickle.dump(X_valid, open(outDir+'valid.seqs', 'wb'), -1)
+	pickle.dump(y_train, open(outDir+'train.labels', 'wb'), -1)
+	pickle.dump(y_test, open(outDir+'test.labels', 'wb'), -1)
+	pickle.dump(y_valid, open(outDir+'valid.labels', 'wb'), -1)
