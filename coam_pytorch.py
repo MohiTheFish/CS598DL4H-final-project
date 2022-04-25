@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import numpy as np
 import pickle as pickle
 import random
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
 from torch.utils.data import Dataset
 
@@ -40,6 +40,10 @@ class CustomDataset(Dataset):
         """
         return (self.diagnoses[index], self.prescriptions[index]), self.y[index]
 
+def separateData(data):
+    xDiagnoses = [i[0] for i in data]
+    xPrescriptions = [i[1] for i in data]
+    return xDiagnoses, xPrescriptions
 
 def yToTensor(y):
     y = torch.from_numpy(np.array(y)).long().to(device)
@@ -58,37 +62,26 @@ class RetainNN(nn.Module):
         num_embeddings(int): size of the dictionary of embeddings
         embedding_dim(int) the size of each embedding vector
         """
-        #self.emb_layer = nn.Embedding(num_embeddings=params["num_embeddings"], embedding_dim=params["embedding_dim"])
-        self.emb_layer_diagnoses = nn.Linear(in_features=params["num_embeddings_diagnoses"], out_features=params["embedding_dim"])
-        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_embeddings_prescriptions"], out_features=params["embedding_dim"])
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=2)
+        emb_size = 256
+        self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=emb_size)
+        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=emb_size)
         
         self.dropout = nn.Dropout(params["dropout_p"])
 
-        self.diagnoses_rnn = nn.GRU(params["embedding_dim"], params["embedding_dim"], bidirectional=True)
-        self.prescriptions_rnn = nn.GRU(params["embedding_dim"], params["embedding_dim"], bidirectional=True)
+        self.diagnoses_hidden_size = 128
+        self.prescriptions_hidden_size = 128
 
-        self.diagnoses_attention = nn.Linear(in_features=2*params["embedding_dim"], out_features=params["embedding_dim"] )
-        self.treatment_attention = nn.Linear(in_features=2*params["embedding_dim"], out_features=params["embedding_dim"] )
+        self.diagnoses_rnn = nn.GRU(input_size=emb_size, hidden_size=self.diagnoses_hidden_size, bidirectional=True)
+        self.prescriptions_rnn = nn.GRU(input_size=emb_size,  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
+
+        self.diagnoses_attention = nn.Linear(in_features=emb_size, out_features=emb_size )
+        self.treatment_attention = nn.Linear(in_features=emb_size, out_features=emb_size )
 
 
-        self.concatenation = nn.Linear(in_features=params["embedding_dim"], out_features=params["embedding_dim"])
-        self.tanh = nn.Tanh()
+        self.concatenation = nn.Linear(in_features=emb_size, out_features=128)
 
 
-        self.prediction = nn.Linear(in_features=params["embedding_dim"], out_features=params["num_embeddings_diagnoses"]+params["num_embeddings_prescriptions"])
-        self.sigmoid = nn.Sigmoid()
-        # self.variable_level_rnn = nn.GRU(params["var_rnn_hidden_size"], params["var_rnn_output_size"])
-        # self.visit_level_rnn = nn.GRU(params["visit_rnn_hidden_size"], params["visit_rnn_output_size"])
-        # self.variable_level_attention = nn.Linear(params["var_rnn_output_size"], params["var_attn_output_size"])
-        # self.visit_level_attention = nn.Linear(params["visit_rnn_output_size"], params["visit_attn_output_size"])
-        # self.output_dropout = nn.Dropout(params["output_dropout_p"])
-        # self.output_layer = nn.Linear(params["embedding_output_size"], params["num_class"])
-
-        self.var_hidden_size = params["embedding_dim"]
-        self.visit_hidden_size = params["embedding_dim"]
-
+        self.prediction = nn.Linear(in_features=128, out_features=params["num_class"])
         # self.n_samples = params["batch_size"]
         # self.reverse_rnn_feeding = params["reverse_rnn_feeding"]
 
@@ -102,106 +95,61 @@ class RetainNN(nn.Module):
         """
         # emb_layer: input(*): LongTensor of arbitrary shape containing the indices to extract
         # emb_layer: output(*,H): where * is the input shape and H = embedding_dim
-        print(diagnoses.shape, prescriptions.shape)
+        # print(diagnoses.shape, prescriptions.shape)
         d = self.emb_layer_diagnoses(diagnoses)
         p = self.emb_layer_prescriptions(prescriptions)
-        d = self.relu(d)
-        p = self.relu(p)
+        # d = F.relu(d)
+        # p = F.relu(p)
 
         d = self.dropout(d)
         p = self.dropout(p)
 
-        # GRU:
-        # input of shape (seq_len, batch, input_size)
-        # seq_len: visit_seq_len
-        # batch: batch_size
-        # input_size: embedding dimension
-        #
-        # h_0 of shape (num_layers*num_directions, batch, hidden_size)
-        # num_layers(1)*num_directions(1)
-        # batch: batch_size
-        # hidden_size:
-        # if self.reverse_rnn_feeding:
-        #     visit_rnn_output, visit_rnn_hidden = self.visit_level_rnn(torch.flip(v, [0]), visit_rnn_hidden)
-        #     alpha = self.visit_level_attention(torch.flip(visit_rnn_output, [0]))
-        # else:
-        #     visit_rnn_output, visit_rnn_hidden = self.visit_level_rnn(v, visit_rnn_hidden)
-        #     alpha = self.visit_level_attention(visit_rnn_output)
-        # visit_attn_w = F.softmax(alpha, dim=0)
-
-        
-
-        # if self.reverse_rnn_feeding:
-        #     var_rnn_output, var_rnn_hidden = self.variable_level_rnn(torch.flip(v, [0]), var_rnn_hidden)
-        #     beta = self.variable_level_attention(torch.flip(var_rnn_output, [0]))
-        # else:
-        #     var_rnn_output, var_rnn_hidden = self.variable_level_rnn(v, var_rnn_hidden)
-        #     beta = self.variable_level_attention(var_rnn_output)
-        # var_attn_w = torch.tanh(beta)
         d_rnn_output, d_rnn_hidden = self.diagnoses_rnn(d, d_rnn_hidden)
         p_rnn_output, p_rnn_hidden = self.prescriptions_rnn(p, p_rnn_hidden)
-        print(d_rnn_output.shape, p_rnn_output.shape)
-        
-        # d = torch.permute(d_rnn_output, (1, 2, 0))
-        # p = torch.permute(p_rnn_output, (1, 2, 0))
-        # print(p.shape, d.shape)
-
+        # print(d_rnn_output.shape, p_rnn_output.shape)
 
         # Combining operation is unclear
         # com = torch.cat((d, p), 2).permute((2, 0, 1))
         com = d_rnn_output + p_rnn_output # torch.sum((d_rnn_output, p_rnn_output), dim=0)
-        print(com.shape)
+        # print(com.shape)
 
 
         alpha = self.diagnoses_attention(com)
         beta = self.treatment_attention(com)
-        print(alpha.shape, beta.shape)
+        # print(alpha.shape, beta.shape)
 
-        alpha_t = self.softmax(alpha)
-        beta_t = self.softmax(beta)
-        print(alpha_t.shape, beta_t.shape)
+        alpha_t = F.softmax(alpha, dim=2)
+        beta_t = F.softmax(beta, dim=2)
 
-        h_t = beta_t*d_rnn_hidden
-        g_t = alpha_t*p_rnn_hidden
+        # print(alpha_t.shape, beta_t.shape)
 
-        print(h_t.shape, g_t.shape)
+        # print(beta_t.shape, d_rnn_hidden.shape)
+        h_t = torch.sum(beta_t*d_rnn_output, dim=0)
+        g_t = torch.sum(alpha_t*p_rnn_output, dim=0)
+
+        # print(h_t.shape, g_t.shape)
 
         p = self.concatenation(h_t + g_t)
-        p = self.tanh(p)
+        p = torch.tanh(p)
 
+        # print(p.shape)
         output = self.prediction(p)
-        output = self.softmax(output)
-
-
-
-        # # print("beta attn:")
-        # # print(var_attn_w.shape)
-        # # '*' = hadamard product (element-wise product)
-        # attn_w = visit_attn_w * var_attn_w
-        # c = torch.sum(attn_w * v, dim=0)
-        # # print("context:")
-        # # print(c.shape)
-
-        # c = self.output_dropout(c)
-        # #print("context:")
-        # #print(c.shape)
-        # output = self.output_layer(c)
-        # #print("output:")
-        # #print(output.shape)
-        # output = F.softmax(output, dim=1)
-        # # print("output:")
-        # # print(output.shape)
+        # print(output)
+        output = F.softmax(output, dim=1)
+        # print(output)
 
         return output
 
-    def init_hidden(self, current_batch_size):
-        return torch.zeros(2, current_batch_size, self.var_hidden_size).to(device), torch.zeros(2, current_batch_size, self.visit_hidden_size).to(device)
+    def init_hidden(self, input_shape):
+        current_padding_len = 2 #input_shape[0]
+        current_batch_size = input_shape[1]
+        return torch.zeros(current_padding_len, current_batch_size, self.diagnoses_hidden_size).to(device), torch.zeros(current_padding_len, current_batch_size, self.prescriptions_hidden_size).to(device)
 
 
 def init_params(params: dict):
     # embedding matrix
-    params["num_embeddings_diagnoses"] = 942
-    params["num_embeddings_prescriptions"] = 3271
+    params["num_diagnoses_codes"] = 942
+    params["num_prescription_codes"] = 3271
     params["embedding_dim"] = 128
     # embedding dropout
     params["dropout_p"] = 0.5
@@ -219,7 +167,7 @@ def init_params(params: dict):
     params["output_dropout_p"] = 0.8
 
     params["batch_size"] = 100
-    params["n_epoches"] = 100
+    params["n_epoches"] = 50
 
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
@@ -249,10 +197,9 @@ def padMatrixWithoutTime(data, num_embeddings):
 
 
 def init_data(params: dict):
-    diagnoses = np.array(pickle.load(open(params["diagnoses_file"], 'rb')))
-    labels = np.array(pickle.load(open(params["label_file"], 'rb')))
-    prescriptions = np.array(pickle.load(open(params["prescriptions_file"], 'rb')))
-    # xToTensor(diagnoses, params["diagnoses_embedding_dim"]) ################# Convert to tensor here?!?!?!??!
+    diagnoses = np.array(pickle.load(open(params["diagnoses_file"], 'rb')), dtype='object')
+    labels = np.array(pickle.load(open(params["label_file"], 'rb')), dtype='object')
+    prescriptions = np.array(pickle.load(open(params["prescriptions_file"], 'rb')), dtype='object')
 
     dataset = CustomDataset(diagnoses, prescriptions, labels)
     data_size = len(dataset)
@@ -286,9 +233,33 @@ def init_data(params: dict):
 
     return train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y
 
+def evalModel(model, set_x, set_y):
+    xDiagnoses, xPrescriptions = separateData(set_x)
+    xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
+    xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
+    y_true = yToTensor(set_y)
+    diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape)
+    pred = model(xDiagnoses, xPrescriptions, diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init)
+    y_true = y_true.unsqueeze(1)
+    y_true_oh = torch.zeros(pred.shape).to(device).scatter_(1, y_true, 1)
+
+    y_true = y_true_oh.detach().cpu().numpy()
+    y_pred = pred.detach().cpu().numpy()
+    # print(y_pred)
+    # print(y_true)
+    auc = roc_auc_score(y_true=y_true, y_score=y_pred)
+    
+    y_pred[y_pred > 0.5] = 1
+    y_pred[y_pred <= 0.5] = 0
+    y_pred = y_pred.astype(np.int32)
+    y_true = y_true.astype(np.int32)
+    p = precision_score(y_true, y_pred, average='macro')
+    r = recall_score(y_true, y_pred, average='macro')
+    f = f1_score(y_true, y_pred, average='macro')
+
+    return auc, p, r, f
 
 if __name__ == "__main__":
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #print(device)
     parameters = dict()
@@ -302,10 +273,9 @@ if __name__ == "__main__":
         if p.requires_grad:
             tot += p.numel()
     print('numParameters:', tot)
-    exit(1)
     # for name, parm in model.named_parameters():
     #   print(name, parm)
-    optimizer = torch.optim.Adadelta(model.parameters(), lr=1.0, rho=0.9, eps=1e-6, weight_decay=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=.0001)
     loss_fn = torch.nn.CrossEntropyLoss()
 
     n_batches = int(np.ceil(float(len(train_set_y)) / float(parameters["batch_size"])))
@@ -321,27 +291,20 @@ if __name__ == "__main__":
             lIndex = index*parameters["batch_size"]
             rIndex = (index+1)*parameters["batch_size"]
 
-            x = train_set_x[lIndex:rIndex]
-            xDiagnoses = [i[0] for i in x]
-            xPrescriptions = [i[1] for i in x]
+            xDiagnoses, xPrescriptions = separateData(train_set_x[lIndex:rIndex])
             y = train_set_y[lIndex:rIndex]
 
-            xDiagnoses = xToTensor(xDiagnoses, parameters['num_embeddings_diagnoses'])
-            xPrescriptions = xToTensor(xPrescriptions, parameters['num_embeddings_prescriptions'])
+            xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
+            xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
             y = yToTensor(y)
             
-            print('xDiagnoss.shape:', xDiagnoses.shape)
-            diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape[1])
+            # print('xDiagnoss.shape:', xDiagnoses.shape)
+            diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape)
 
             pred = model(xDiagnoses, xPrescriptions, diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init)
             pred = pred.squeeze(1)
-            # print("pred:")
-            # print(pred.shape)
-            # print(pred.data)
-            # print("ybtensor:")
-            # print(ybtensor.shape)
 
-            print(pred.shape, y.shape)
+            # print(pred.shape, y.shape)
             loss = loss_fn(pred, y)
             loss.backward()
             loss_vector[index] = loss
@@ -349,27 +312,16 @@ if __name__ == "__main__":
             optimizer.zero_grad()
 
         model.eval()
-        xDiagnoses, xPrescriptions = xToTensor(valid_set_x)
-        y = yToTensor(valid_set_y)
-        var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
-        y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
-        y_true = y_true.unsqueeze(1)
-        y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
-        auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
-            
-        xDiagnoses, xPrescriptions = xToTensor(test_set_x)
-        y = yToTensor(test_set_y)
-        var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
-        y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
-        y_true = y_true.unsqueeze(1)
-        y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
-        test_auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
+        # evalModel(model, valid_set_x)
 
-        if test_auc > best_test_auc:
-            best_test_auc = test_auc
-            best_epoch = epoch
+        # p, r, f = evalModel(model, train_set_x, train_set_y)
+        auc, p, r, f = evalModel(model, test_set_x, test_set_y)
 
-        print("{},{},{},{}".format(epoch, torch.mean(loss_vector), auc, test_auc))
+        # if test_auc > best_test_auc:
+        #     best_test_auc = test_auc
+        #     best_epoch = epoch
+
+        print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), auc, p,r,f))
 
     # print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
     """

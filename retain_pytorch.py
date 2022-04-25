@@ -88,11 +88,11 @@ class RetainNN(nn.Module):
         # print(c.shape)
 
         c = self.output_dropout(c)
-        #print("context:")
-        #print(c.shape)
+        # print("context:")
+        # print(c.shape)
         output = self.output_layer(c)
-        #print("output:")
-        #print(output.shape)
+        # print("output:")
+        # print(output.shape)
         output = F.softmax(output, dim=1)
         # print("output:")
         # print(output.shape)
@@ -231,7 +231,6 @@ if __name__ == "__main__":
             pred = pred.squeeze(1)
             # print("pred:")
             # print(pred.shape)
-            # print(pred.data)
             # print("ybtensor:")
             # print(ybtensor.shape)
 
@@ -260,6 +259,8 @@ if __name__ == "__main__":
         y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
         y_true = y_true_oh.detach().cpu().numpy()
         y_pred = y_hat.detach().cpu().numpy()
+        # print(y_pred)
+        # print(y_true)
         test_auc = roc_auc_score(y_true=y_true, y_score=y_pred)
 
         if test_auc > best_test_auc:
