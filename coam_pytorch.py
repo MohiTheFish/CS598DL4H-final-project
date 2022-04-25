@@ -60,15 +60,15 @@ def xToTensor(x, embedding_dim):
     x = torch.from_numpy(x).float().to(device)
     return x
 
-def loadData(set_x, set_y):
-    xDiagnoses, xPrescriptions = separateData(set_x)
-    return toTensor(xDiagnoses, xPrescriptions, set_y)
-
-def toTensor(xDiagnoses, xPrescriptions, set_y):
-    xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
-    xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
+def toTensor(xDiagnoses, xPrescriptions, set_y, params):
+    xDiagnoses = xToTensor(xDiagnoses, params['num_diagnoses_codes'])
+    xPrescriptions = xToTensor(xPrescriptions, params['num_prescription_codes'])
     y = yToTensor(set_y)
     return xDiagnoses, xPrescriptions, y
+
+def loadData(set_x, set_y, params):
+    xDiagnoses, xPrescriptions = separateData(set_x)
+    return toTensor(xDiagnoses, xPrescriptions, set_y, params)
 
 class CoamNN(nn.Module):
     def __init__(self, params: dict):
@@ -143,9 +143,8 @@ class CoamNN(nn.Module):
 
         # print(p.shape)
         output = self.prediction(p)
-        # print(output)
+        # print(output.shape)
         output = F.softmax(output, dim=1)
-        # print(output)
 
         return output
 
@@ -165,7 +164,8 @@ def init_params(args):
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
     
-    DATA_PATH = "data/processed_data/"
+    if not args.data_dir.endswith("/"):
+        args.data_dir += "/"
     params["diagnoses_file"] = args.data_dir+args.diagnoses_file
     params["labels_file"] = args.data_dir+args.labels_file
     params["prescriptions_file"] = args.data_dir+args.prescriptions_file
@@ -225,13 +225,37 @@ def init_data(params: dict):
 
     return train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y
 
+# Runs the data through the model and then backpropagates. Returns the loss vector for all of the batches.
+def trainModel(model, train_set_x, train_set_y, optimizer, loss_fn, params):
+    loss_vector = torch.zeros(params["n_batches"], dtype=torch.float)
+    for index in random.sample(range(params["n_batches"]), params["n_batches"]):
+        lIndex = index*params["batch_size"]
+        rIndex = (index+1)*params["batch_size"]
+
+        set_x = train_set_x[lIndex:rIndex]
+        set_y = train_set_y[lIndex:rIndex]
+        xDiagnoses, xPrescriptions, y_true = loadData(set_x, set_y, params)
+        
+        # print('xDiagnoss.shape:', xDiagnoses.shape)
+        pred = model(xDiagnoses, xPrescriptions)
+        y_pred = pred.squeeze(1)
+
+        # print(pred.shape, y.shape)
+        loss = loss_fn(y_pred, y_true)
+        loss.backward()
+        loss_vector[index] = loss
+        optimizer.step()
+        optimizer.zero_grad()
+    return loss_vector
+
+# Evaluates the current model against the test_set data.
 def evalModel(model, set_x, set_y):
-    xDiagnoses, xPrescriptions, y = loadData(set_x, set_y)
+    xDiagnoses, xPrescriptions, y_true = loadData(set_x, set_y, params)
 
     pred = model(xDiagnoses, xPrescriptions)
     y_pred = pred.detach().cpu().numpy()
 
-    y_true = y.unsqueeze(1)
+    y_true = y_true.unsqueeze(1)
     y_true = torch.zeros(pred.shape).to(device).scatter_(1, y_true, 1)
     y_true = y_true.detach().cpu().numpy()
     # print(y_pred)
@@ -252,59 +276,36 @@ if __name__ == "__main__":
 		formatter_class=argparse.ArgumentDefaultsHelpFormatter
 	)
     args = parse_arguments(PARSER)
-    parameters = init_params(args)
+    params = init_params(args)
+    train_set_x, train_set_y, _, _, test_set_x, test_set_y = init_data(params)
 
-    train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y = init_data(parameters)
-
-    model = CoamNN(params=parameters).to(device)
+    model = CoamNN(params=params).to(device)
     tot = 0
     for p in model.parameters():
         if p.requires_grad:
             tot += p.numel()
     print('numParameters:', tot)
-    # for name, parm in model.named_parameters():
-    #   print(name, parm)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=.0001)
     loss_fn = torch.nn.CrossEntropyLoss()
 
-    n_batches = int(np.ceil(float(len(train_set_y)) / float(parameters["batch_size"])))
-    best_valid_auc = 0
-    best_test_auc = 0
-    best_epoch = 0
     print()
     print('Begin training')
-    for epoch in range(parameters["n_epochs"]):
+    params["n_batches"] = int(np.ceil(float(len(train_set_y)) / float(params["batch_size"])))
+    best_test_auc = 0
+    best_epoch = 0
+    for epoch in range(params["n_epochs"]):
         model.train()
-        loss_vector = torch.zeros(n_batches, dtype=torch.float)
-        for index in random.sample(range(n_batches), n_batches):
-            lIndex = index*parameters["batch_size"]
-            rIndex = (index+1)*parameters["batch_size"]
-
-            set_x = train_set_x[lIndex:rIndex]
-            set_y = train_set_y[lIndex:rIndex]
-            xDiagnoses, xPrescriptions, y = loadData(set_x, set_y)
-            
-            # print('xDiagnoss.shape:', xDiagnoses.shape)
-            pred = model(xDiagnoses, xPrescriptions)
-            pred = pred.squeeze(1)
-
-            # print(pred.shape, y.shape)
-            loss = loss_fn(pred, y)
-            loss.backward()
-            loss_vector[index] = loss
-            optimizer.step()
-            optimizer.zero_grad()
+        loss_vector = trainModel(model, train_set_x, train_set_y, optimizer=optimizer, loss_fn=loss_fn, params=params)
 
         model.eval()
         # evalModel(model, valid_set_x)
+        test_auc, p, r, f = evalModel(model, test_set_x, test_set_y)
 
-        # p, r, f = evalModel(model, train_set_x, train_set_y)
-        auc, p, r, f = evalModel(model, test_set_x, test_set_y)
+        if test_auc > best_test_auc:
+            best_test_auc = test_auc
+            best_epoch = epoch
 
-        # if test_auc > best_test_auc:
-        #     best_test_auc = test_auc
-        #     best_epoch = epoch
+        print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), test_auc, p,r,f))
 
-        print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), auc, p,r,f))
-
-    # print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
+    print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
