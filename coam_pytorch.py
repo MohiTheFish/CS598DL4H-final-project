@@ -1,43 +1,49 @@
 # Credit to: https://github.com/easyfan327/Pytorch-RETAIN
+# We are using someone else's implementation as the baseline for ours.
+
 # -*- coding: utf-8 -*-
-from unicodedata import bidirectional
 import torch
 import torch.nn as nn
-import sys
-from torch.utils.data import DataLoader
-from torch.utils.data import TensorDataset
-import torchvision
-import torchvision.transforms as transforms
 import torch.nn.functional as F
 import numpy as np
 import pickle as pickle
 import random
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
-
+import argparse
+from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from torch.utils.data import Dataset
 
 
+def parse_arguments(parser):
+	"""Read user arguments"""
+	parser.add_argument(
+		"--data_dir", type=str, default='data/processed_data/', help="Directory for processed MIMIC-III data. This gets prefixed to all of the other file names."
+	)
+	parser.add_argument(
+		"--diagnoses_file", type=str, default='3digitICD9.seqs.pkl', help="processed DIAGNOSES data file"
+	)
+	parser.add_argument(
+		"--prescriptions_file", type=str, default='prescriptions.pkl', help="processed PRESCRIPTIONS data file"
+	)
+	parser.add_argument(
+		"--labels_file", type=str, default='morts.pkl', help="PRESCRIPTIONS data file"
+	)
+	parser.add_argument(
+		"--epochs", type=int, default=25, help="Number of epochs to run for"
+	)
+	args = parser.parse_args()
+
+	return args
+
 class CustomDataset(Dataset):
-    
     def __init__(self, diagnoses, prescriptions, labels):
         self.diagnoses = diagnoses
         self.prescriptions = prescriptions
         self.y = labels
     
     def __len__(self):
-        
-        """
-        TODO: Return the number of samples (i.e. patients).
-        """
         return len(self.diagnoses)
     
     def __getitem__(self, index):
-        
-        """
-        TODO: Generates one sample of data.
-        
-        Note that you DO NOT need to covert them to tensor as we will do this later.
-        """
         return (self.diagnoses[index], self.prescriptions[index]), self.y[index]
 
 def separateData(data):
@@ -47,7 +53,6 @@ def separateData(data):
 
 def yToTensor(y):
     y = torch.from_numpy(np.array(y)).long().to(device)
-
     return y
 
 def xToTensor(x, embedding_dim):
@@ -55,38 +60,43 @@ def xToTensor(x, embedding_dim):
     x = torch.from_numpy(x).float().to(device)
     return x
 
-class RetainNN(nn.Module):
+def loadData(set_x, set_y):
+    xDiagnoses, xPrescriptions = separateData(set_x)
+    return toTensor(xDiagnoses, xPrescriptions, set_y)
+
+def toTensor(xDiagnoses, xPrescriptions, set_y):
+    xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
+    xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
+    y = yToTensor(set_y)
+    return xDiagnoses, xPrescriptions, y
+
+class CoamNN(nn.Module):
     def __init__(self, params: dict):
-        super(RetainNN, self).__init__()
+        super(CoamNN, self).__init__()
         """
         num_embeddings(int): size of the dictionary of embeddings
         embedding_dim(int) the size of each embedding vector
         """
-        emb_size = 256
-        self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=emb_size)
-        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=emb_size)
+        self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=params["embedding_size"])
+        self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=params["embedding_size"])
         
         self.dropout = nn.Dropout(params["dropout_p"])
 
         self.diagnoses_hidden_size = 128
         self.prescriptions_hidden_size = 128
 
-        self.diagnoses_rnn = nn.GRU(input_size=emb_size, hidden_size=self.diagnoses_hidden_size, bidirectional=True)
-        self.prescriptions_rnn = nn.GRU(input_size=emb_size,  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
+        self.diagnoses_rnn = nn.GRU(input_size=params["embedding_size"], hidden_size=self.diagnoses_hidden_size, bidirectional=True)
+        self.prescriptions_rnn = nn.GRU(input_size=params["embedding_size"],  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
 
-        self.diagnoses_attention = nn.Linear(in_features=emb_size, out_features=emb_size )
-        self.treatment_attention = nn.Linear(in_features=emb_size, out_features=emb_size )
+        self.diagnoses_attention = nn.Linear(in_features=params["embedding_size"], out_features=params["embedding_size"] )
+        self.treatment_attention = nn.Linear(in_features=params["embedding_size"], out_features=params["embedding_size"] )
 
+        self.concatenation = nn.Linear(in_features=params["embedding_size"], out_features=params["embedding_size"]//2)
 
-        self.concatenation = nn.Linear(in_features=emb_size, out_features=128)
-
-
-        self.prediction = nn.Linear(in_features=128, out_features=params["num_class"])
-        # self.n_samples = params["batch_size"]
-        # self.reverse_rnn_feeding = params["reverse_rnn_feeding"]
+        self.prediction = nn.Linear(in_features=params["embedding_size"]//2, out_features=params["num_class"])
 
 
-    def forward(self, diagnoses, prescriptions, d_rnn_hidden, p_rnn_hidden):
+    def forward(self, diagnoses, prescriptions):
         """
         :param input:
         :param var_rnn_hidden:
@@ -98,19 +108,20 @@ class RetainNN(nn.Module):
         # print(diagnoses.shape, prescriptions.shape)
         d = self.emb_layer_diagnoses(diagnoses)
         p = self.emb_layer_prescriptions(prescriptions)
-        # d = F.relu(d)
-        # p = F.relu(p)
+        d = F.relu(d)
+        p = F.relu(p)
 
         d = self.dropout(d)
         p = self.dropout(p)
 
-        d_rnn_output, d_rnn_hidden = self.diagnoses_rnn(d, d_rnn_hidden)
-        p_rnn_output, p_rnn_hidden = self.prescriptions_rnn(p, p_rnn_hidden)
+        # Intialize the hidden vectors to 0.
+        d_rnn_output, _ = self.diagnoses_rnn(d)
+        p_rnn_output, _ = self.prescriptions_rnn(p)
         # print(d_rnn_output.shape, p_rnn_output.shape)
 
         # Combining operation is unclear
         # com = torch.cat((d, p), 2).permute((2, 0, 1))
-        com = d_rnn_output + p_rnn_output # torch.sum((d_rnn_output, p_rnn_output), dim=0)
+        com = d_rnn_output + p_rnn_output
         # print(com.shape)
 
 
@@ -123,7 +134,6 @@ class RetainNN(nn.Module):
 
         # print(alpha_t.shape, beta_t.shape)
 
-        # print(beta_t.shape, d_rnn_hidden.shape)
         h_t = torch.sum(beta_t*d_rnn_output, dim=0)
         g_t = torch.sum(alpha_t*p_rnn_output, dim=0)
 
@@ -140,55 +150,35 @@ class RetainNN(nn.Module):
 
         return output
 
-    def init_hidden(self, input_shape):
-        current_padding_len = 2 #input_shape[0]
-        current_batch_size = input_shape[1]
-        return torch.zeros(current_padding_len, current_batch_size, self.diagnoses_hidden_size).to(device), torch.zeros(current_padding_len, current_batch_size, self.prescriptions_hidden_size).to(device)
-
-
-def init_params(params: dict):
+def init_params(args):
+    params = {}
     # embedding matrix
     params["num_diagnoses_codes"] = 942
     params["num_prescription_codes"] = 3271
-    params["embedding_dim"] = 128
+    params["embedding_size"] = 256
     # embedding dropout
     params["dropout_p"] = 0.5
-    # Alpha
-    params["visit_rnn_hidden_size"] = 128
-    params["visit_rnn_output_size"] = 128
-    params["visit_attn_output_size"] = 1
-    # Beta
-    params["var_rnn_hidden_size"] = 128
-    params["var_rnn_output_size"] = 128
-    params["var_attn_output_size"] = 128
-
-    params["embedding_output_size"] = 128
     params["num_class"] = 2
-    params["output_dropout_p"] = 0.8
 
     params["batch_size"] = 100
-    params["n_epoches"] = 50
+    params["n_epochs"] = args.epochs
 
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
     
     DATA_PATH = "data/processed_data/"
-    params["diagnoses_file"] = DATA_PATH+"3digitICD9.seqs.pkl"
-    params["label_file"] = DATA_PATH+"morts.pkl"
-    params["prescriptions_file"] = DATA_PATH+"prescriptions.pkl"
+    params["diagnoses_file"] = args.data_dir+args.diagnoses_file
+    params["labels_file"] = args.data_dir+args.labels_file
+    params["prescriptions_file"] = args.data_dir+args.prescriptions_file
 
-    params["reverse_rnn_feeding"] = True
+    return params
 
-    # TODO: Customized Loss
-    # TODO: REF: https://stackoverflow.com/questions/42704283/adding-l1-l2-regularization-in-pytorch
-    params["customized_loss"] = True
-
-def padMatrixWithoutTime(data, num_embeddings):
+def padMatrixWithoutTime(data, max_codes):
     lengths = np.array([len(d) for d in data]).astype('int32')
     n_samples = len(data)
     maxlen = np.max(lengths)
 
-    x = np.zeros((maxlen, n_samples, num_embeddings))
+    x = np.zeros((maxlen, n_samples, max_codes))
     for idx, d in enumerate(data):
         for xvec, subd in zip(x[:, idx, :], d):
             xvec[subd] = 1.
@@ -198,53 +188,53 @@ def padMatrixWithoutTime(data, num_embeddings):
 
 def init_data(params: dict):
     diagnoses = np.array(pickle.load(open(params["diagnoses_file"], 'rb')), dtype='object')
-    labels = np.array(pickle.load(open(params["label_file"], 'rb')), dtype='object')
     prescriptions = np.array(pickle.load(open(params["prescriptions_file"], 'rb')), dtype='object')
+    labels = np.array(pickle.load(open(params["labels_file"], 'rb')), dtype='object')
 
     dataset = CustomDataset(diagnoses, prescriptions, labels)
     data_size = len(dataset)
+    # A list of indices, randomly ordered
     ind = np.random.permutation(data_size)
 
     test_size = int(params["test_ratio"] * data_size)
     validation_size = int(params["validation_ratio"] * data_size)
 
+    # Split the indices into training/valid/test split
     test_indices = ind[:test_size]
     valid_indices = ind[test_size:test_size + validation_size]
     train_indices = ind[test_size + validation_size:]
 
+    # Retrieve data from those indices
     train_set_x, train_set_y = dataset[train_indices]
     test_set_x, test_set_y = dataset[test_indices]
     valid_set_x, valid_set_y = dataset[valid_indices]
 
+    # Order the data by number of visit
     def len_argsort(data):
         return sorted(range(len(data)), key=lambda x: len(data[x]))
 
-    train_sorted_index = len_argsort(diagnoses[train_indices])
-    train_set_x = [(train_set_x[0][i], train_set_x[1][i]) for i in train_sorted_index]
-    train_set_y = [train_set_y[i] for i in train_sorted_index]
+    # Using the number of visits from diagnoses for diagnoses and prescriptions because the shapes are identical
+    def order_set(set_x, set_y, indices):
+        sorted_index = len_argsort(diagnoses[indices])
+        set_x = [(set_x[0][i], set_x[1][i]) for i in sorted_index]
+        set_y = [set_y[i] for i in sorted_index]
+        return set_x, set_y
 
-    valid_sorted_index = len_argsort(diagnoses[valid_indices])
-    valid_set_x = [(valid_set_x[0][i], valid_set_x[1][i]) for i in valid_sorted_index]
-    valid_set_y = [valid_set_y[i] for i in valid_sorted_index]
-
-    test_sorted_index = len_argsort(diagnoses[test_indices])
-    test_set_x = [(test_set_x[0][i], test_set_x[1][i]) for i in test_sorted_index]
-    test_set_y = [test_set_y[i] for i in test_sorted_index]
+    train_set_x, train_set_y = order_set(train_set_x, train_set_y, train_indices)
+    test_set_x, test_set_y = order_set(test_set_x, test_set_y, test_indices)
+    valid_set_x, valid_set_y = order_set(valid_set_x, valid_set_y, valid_indices)
 
     return train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y
 
 def evalModel(model, set_x, set_y):
-    xDiagnoses, xPrescriptions = separateData(set_x)
-    xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
-    xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
-    y_true = yToTensor(set_y)
-    diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape)
-    pred = model(xDiagnoses, xPrescriptions, diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init)
-    y_true = y_true.unsqueeze(1)
-    y_true_oh = torch.zeros(pred.shape).to(device).scatter_(1, y_true, 1)
+    xDiagnoses, xPrescriptions, y = loadData(set_x, set_y)
 
-    y_true = y_true_oh.detach().cpu().numpy()
+    pred = model(xDiagnoses, xPrescriptions)
     y_pred = pred.detach().cpu().numpy()
+
+    y_true = y.unsqueeze(1)
+    y_true = torch.zeros(pred.shape).to(device).scatter_(1, y_true, 1)
+    y_true = y_true.detach().cpu().numpy()
     # print(y_pred)
     # print(y_true)
     auc = roc_auc_score(y_true=y_true, y_score=y_pred)
@@ -253,21 +243,20 @@ def evalModel(model, set_x, set_y):
     y_pred[y_pred <= 0.5] = 0
     y_pred = y_pred.astype(np.int32)
     y_true = y_true.astype(np.int32)
-    p = precision_score(y_true, y_pred, average='macro')
-    r = recall_score(y_true, y_pred, average='macro')
-    f = f1_score(y_true, y_pred, average='macro')
-
+    p, r, f, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
     return auc, p, r, f
 
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    #print(device)
-    parameters = dict()
-    init_params(parameters)
+    PARSER = argparse.ArgumentParser(
+		formatter_class=argparse.ArgumentDefaultsHelpFormatter
+	)
+    args = parse_arguments(PARSER)
+    parameters = init_params(args)
 
     train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y = init_data(parameters)
 
-    model = RetainNN(params=parameters).to(device)
+    model = CoamNN(params=parameters).to(device)
     tot = 0
     for p in model.parameters():
         if p.requires_grad:
@@ -283,25 +272,20 @@ if __name__ == "__main__":
     best_test_auc = 0
     best_epoch = 0
     print()
-    print()
-    for epoch in range(parameters["n_epoches"]):
+    print('Begin training')
+    for epoch in range(parameters["n_epochs"]):
         model.train()
         loss_vector = torch.zeros(n_batches, dtype=torch.float)
         for index in random.sample(range(n_batches), n_batches):
             lIndex = index*parameters["batch_size"]
             rIndex = (index+1)*parameters["batch_size"]
 
-            xDiagnoses, xPrescriptions = separateData(train_set_x[lIndex:rIndex])
-            y = train_set_y[lIndex:rIndex]
-
-            xDiagnoses = xToTensor(xDiagnoses, parameters['num_diagnoses_codes'])
-            xPrescriptions = xToTensor(xPrescriptions, parameters['num_prescription_codes'])
-            y = yToTensor(y)
+            set_x = train_set_x[lIndex:rIndex]
+            set_y = train_set_y[lIndex:rIndex]
+            xDiagnoses, xPrescriptions, y = loadData(set_x, set_y)
             
             # print('xDiagnoss.shape:', xDiagnoses.shape)
-            diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init = model.init_hidden(xDiagnoses.shape)
-
-            pred = model(xDiagnoses, xPrescriptions, diagnoses_rnn_hidden_init, prescriptions_rnn_hidden_init)
+            pred = model(xDiagnoses, xPrescriptions)
             pred = pred.squeeze(1)
 
             # print(pred.shape, y.shape)
@@ -324,15 +308,3 @@ if __name__ == "__main__":
         print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), auc, p,r,f))
 
     # print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
-    """
-    model.eval()
-    x, x_length = padMatrixWithoutTime(seqs=test_set_x, options=parameters)
-    x = torch.from_numpy(x).float().to(device)
-    y_true = torch.from_numpy(np.array(test_set_y)).long().to(device)
-    var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
-    y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
-    y_true = y_true.unsqueeze(1)
-    y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
-    auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
-    print("test auc:{}".format(auc))
-    """
