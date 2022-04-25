@@ -28,7 +28,10 @@ def parse_arguments(parser):
         "--labels_file", type=str, default='morts.pkl', help="PRESCRIPTIONS data file"
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of epochs to run for"
+        "--epochs", type=int, dest="n_epochs", default=10, help="Number of epochs to run for"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=100, help="How many data points to consider in a single batch"
     )
     parser.add_argument(
         "--save_model", type=str, help="Output path to save the trained model parameters to.", metavar='OUTPUT_PATH'
@@ -88,13 +91,14 @@ class CoamNN(nn.Module):
         num_embeddings(int): size of the dictionary of embeddings
         embedding_dim(int) the size of each embedding vector
         """
+        self.diagnoses_hidden_size = 128
+        self.prescriptions_hidden_size = 128
+        self.num_output_classes = 2
+
         self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=params["embedding_size"])
         self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=params["embedding_size"])
         
         self.dropout = nn.Dropout(params["dropout_p"])
-
-        self.diagnoses_hidden_size = 128
-        self.prescriptions_hidden_size = 128
 
         self.diagnoses_rnn = nn.GRU(input_size=params["embedding_size"], hidden_size=self.diagnoses_hidden_size, bidirectional=True)
         self.prescriptions_rnn = nn.GRU(input_size=params["embedding_size"],  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
@@ -104,7 +108,7 @@ class CoamNN(nn.Module):
 
         self.concatenation = nn.Linear(in_features=params["embedding_size"], out_features=params["embedding_size"]//2)
 
-        self.prediction = nn.Linear(in_features=params["embedding_size"]//2, out_features=params["num_class"])
+        self.prediction = nn.Linear(in_features=params["embedding_size"]//2, out_features=self.num_output_classes)
 
 
     def forward(self, diagnoses, prescriptions):
@@ -165,12 +169,8 @@ def init_params(args):
     params["num_diagnoses_codes"] = 942
     params["num_prescription_codes"] = 3271
     params["embedding_size"] = 256
-    # embedding dropout
-    params["dropout_p"] = 0.5
-    params["num_class"] = 2
 
-    params["batch_size"] = 100
-    params["n_epochs"] = args.epochs
+    params["dropout_p"] = 0.5
 
     params["test_ratio"] = 0.2
     params["validation_ratio"] = 0.1
@@ -179,7 +179,7 @@ def init_params(args):
     for arg in vars(args):
         params[arg] = getattr(args, arg)
     
-    # Override all of the files with the prefix 
+    # Override all of the files with the prefix specified by data_dir
     if not args.data_dir.endswith("/"):
         args.data_dir += "/"
     params["diagnoses_file"] = args.data_dir+args.diagnoses_file
@@ -230,7 +230,7 @@ def init_data(params: dict):
     def len_argsort(data):
         return sorted(range(len(data)), key=lambda x: len(data[x]))
 
-    # Using the number of visits from diagnoses for diagnoses and prescriptions because the shapes are identical
+    # We can use the number of visits from diagnoses for prescriptions because both shapes are identical
     def order_set(set_x, set_y, indices):
         sorted_index = len_argsort(diagnoses[indices])
         set_x = [(set_x[0][i], set_x[1][i]) for i in sorted_index]
@@ -253,12 +253,10 @@ def trainModel(model, train_set_x, train_set_y, optimizer, loss_fn, params):
         set_x = train_set_x[lIndex:rIndex]
         set_y = train_set_y[lIndex:rIndex]
         xDiagnoses, xPrescriptions, y_true = loadData(set_x, set_y, params)
-        
-        # print('xDiagnoss.shape:', xDiagnoses.shape)
+
         pred = model(xDiagnoses, xPrescriptions)
         y_pred = pred.squeeze(1)
 
-        # print(pred.shape, y.shape)
         loss = loss_fn(y_pred, y_true)
         loss.backward()
         loss_vector[index] = loss
@@ -276,8 +274,6 @@ def evalModel(model, set_x, set_y):
     y_true = y_true.unsqueeze(1)
     y_true = torch.zeros(pred.shape).to(device).scatter_(1, y_true, 1)
     y_true = y_true.detach().cpu().numpy()
-    # print(y_pred)
-    # print(y_true)
     auc = roc_auc_score(y_true=y_true, y_score=y_pred)
     
     y_pred[y_pred > 0.5] = 1
