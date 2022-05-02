@@ -71,19 +71,19 @@ This has all of the preprocessed data that we used.
 ## Building our Model
 You can build and train the model and have it be evaluated by simply running 
 ```bash
-python coam_pytorch.py [--save_model OUTPUT_PATH] [--epochs NUM_EPOCHS] [--batch_size BATCH_SIZE]
+python run_model.py [--model MODEL] [--save_model OUTPUT_PATH] [--epochs NUM_EPOCHS] [--batch_size BATCH_SIZE] 
 ```
-The script will default to using the files we generated before. It will run for 10 epochs with a batch size of 100. If you choose to save the model, you can evaluate it later by using the load model arg:
+The default model that is used is our basic COAM model. You can pick one of `[retain, coam, coam_alpha, coam_beta]` for the model arg. The script will default to using the file names we generated before. It will run for 10 epochs with a batch size of 100. If you choose to save the model, you can evaluate it later by using the load model arg:
 ```bash
-python coam_pytorch.py [--load_model MODEL_PATH]
+python run_model.py [--load_model MODEL_PATH]
 ```
-If this arg is specified, there will be no training done, and the existing model wil *only* be evaluated.
+If this arg is specified, there will be **no** training done, and the existing model wil **only** be evaluated.
 
 
 ## Other Baseline Model
 Our baseline model is a pytorch implementation of RETAIN. Credit goes to https://github.com/easyfan327/Pytorch-RETAIN. You can run this model with
 ```cmd
-python retain_pytorch.py
+python run_model.py --model retain
 ```
 
 

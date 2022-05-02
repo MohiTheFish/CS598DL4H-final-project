@@ -76,13 +76,163 @@ def load_data_coam(set_x, set_y, params):
     return _toTensor(xDiagnoses, xPrescriptions, set_y, params)
 
 
+def init_CoamNN(self, params):
+    """
+    num_embeddings(int): size of the dictionary of embeddings
+    embedding_dim(int) the size of each embedding vector
+    """
+    self.diagnoses_hidden_size = 128
+    self.prescriptions_hidden_size = 128
+    self.num_output_classes = 2
+    self.embedding_size = 256
+
+    self.emb_layer_diagnoses = nn.Linear(in_features=params["num_diagnoses_codes"], out_features=self.embedding_size)
+    self.emb_layer_prescriptions = nn.Linear(in_features=params["num_prescription_codes"], out_features=self.embedding_size)
+    
+    self.dropout = nn.Dropout(params["dropout_p"])
+
+    self.diagnoses_rnn = nn.GRU(input_size=self.embedding_size, hidden_size=self.diagnoses_hidden_size, bidirectional=True)
+    self.prescriptions_rnn = nn.GRU(input_size=self.embedding_size,  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
+
+    self.diagnoses_attention = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size )
+    self.treatment_attention = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size )
+
+    self.concatenation = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size//2)
+
+    self.prediction = nn.Linear(in_features=self.embedding_size//2, out_features=self.num_output_classes)
+
+
 class CoamNN(nn.Module):
     def __init__(self, params: dict):
         super(CoamNN, self).__init__()
+        init_CoamNN(self, params)
+
+
+    def forward(self, diagnoses, prescriptions):
         """
-        num_embeddings(int): size of the dictionary of embeddings
-        embedding_dim(int) the size of each embedding vector
+        :param input:
+        :param var_rnn_hidden:
+        :param visit_rnn_hidden:
+        :return:
         """
+        # emb_layer: input(*): LongTensor of arbitrary shape containing the indices to extract
+        # emb_layer: output(*,H): where * is the input shape and H = embedding_dim
+        # print(diagnoses.shape, prescriptions.shape)
+        d = self.emb_layer_diagnoses(diagnoses)
+        p = self.emb_layer_prescriptions(prescriptions)
+        d = F.relu(d)
+        p = F.relu(p)
+
+        d = self.dropout(d)
+        p = self.dropout(p)
+
+        h, _ = self.diagnoses_rnn(d)
+        g, _ = self.prescriptions_rnn(p)
+        # print(d_rnn_output.shape, p_rnn_output.shape)
+
+        # Combining operation is unclear
+        # com = torch.cat((d, p), 2).permute((2, 0, 1))
+        com = h + g
+        # print(com.shape)
+
+        alpha = self.diagnoses_attention(com)
+        beta = self.treatment_attention(com)
+        # print(alpha.shape, beta.shape)
+
+        alpha_t = F.softmax(alpha, dim=2)
+        beta_t = F.softmax(beta, dim=2)
+
+        # print(alpha_t.shape, beta_t.shape)
+
+        h_t = torch.sum(beta_t*h, dim=0)
+        g_t = torch.sum(alpha_t*g, dim=0)
+
+        # print(h_t.shape, g_t.shape)
+
+        p = self.concatenation(h_t + g_t)
+        p = torch.tanh(p)
+
+        # print(p.shape)
+        output = self.prediction(p)
+        # print(output.shape)
+        output = F.softmax(output, dim=1)
+
+        return output
+
+    def default_optimizer(self):
+        return torch.optim.Adam(self.parameters(), lr=.0001)
+    def default_loss_fn(self):
+        return torch.nn.CrossEntropyLoss()
+
+class CoamAlphaNN(nn.Module):
+    def __init__(self, params: dict):
+        super(CoamAlphaNN, self).__init__()
+        init_CoamNN(self, params)
+
+
+    def forward(self, diagnoses, prescriptions):
+        """
+        :param input:
+        :param var_rnn_hidden:
+        :param visit_rnn_hidden:
+        :return:
+        """
+        # emb_layer: input(*): LongTensor of arbitrary shape containing the indices to extract
+        # emb_layer: output(*,H): where * is the input shape and H = embedding_dim
+        # print(diagnoses.shape, prescriptions.shape)
+        d = self.emb_layer_diagnoses(diagnoses)
+        p = self.emb_layer_prescriptions(prescriptions)
+        d = F.relu(d)
+        p = F.relu(p)
+
+        d = self.dropout(d)
+        p = self.dropout(p)
+
+        h, _ = self.diagnoses_rnn(d)
+        g, _ = self.prescriptions_rnn(p)
+        # print(d_rnn_output.shape, p_rnn_output.shape)
+
+        # Combining operation is unclear
+        # com = torch.cat((d, p), 2).permute((2, 0, 1))
+        # com = h + g
+        # print(com.shape)
+
+
+        alpha = self.diagnoses_attention(h)
+        beta = self.treatment_attention(g)
+        # print(alpha.shape, beta.shape)
+
+        alpha_t = F.softmax(alpha, dim=2)
+        beta_t = F.softmax(beta, dim=2)
+
+        # print(alpha_t.shape, beta_t.shape)
+
+        h_t = torch.sum(beta_t*h, dim=0)
+        g_t = torch.sum(alpha_t*g, dim=0)
+
+        # print(h_t.shape, g_t.shape)
+
+        p = self.concatenation(h_t + g_t)
+        p = torch.tanh(p)
+
+        # print(p.shape)
+        output = self.prediction(p)
+        # print(output.shape)
+        output = F.softmax(output, dim=1)
+
+        return output
+
+    def default_optimizer(self):
+        return torch.optim.Adam(self.parameters(), lr=.0001)
+    def default_loss_fn(self):
+        return torch.nn.CrossEntropyLoss()
+
+
+class CoamBetaNN(nn.Module):
+    def __init__(self, params: dict):
+        super(CoamBetaNN, self).__init__()
+        
+        
         self.diagnoses_hidden_size = 128
         self.prescriptions_hidden_size = 128
         self.num_output_classes = 2
@@ -96,8 +246,7 @@ class CoamNN(nn.Module):
         self.diagnoses_rnn = nn.GRU(input_size=self.embedding_size, hidden_size=self.diagnoses_hidden_size, bidirectional=True)
         self.prescriptions_rnn = nn.GRU(input_size=self.embedding_size,  hidden_size=self.prescriptions_hidden_size, bidirectional=True)
 
-        self.diagnoses_attention = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size )
-        self.treatment_attention = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size )
+        self.attention = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size )
 
         self.concatenation = nn.Linear(in_features=self.embedding_size, out_features=self.embedding_size//2)
 
@@ -132,8 +281,8 @@ class CoamNN(nn.Module):
         # print(com.shape)
 
 
-        alpha = self.diagnoses_attention(com)
-        beta = self.treatment_attention(com)
+        alpha = self.attention(com)
+        beta = self.attention(com)
         # print(alpha.shape, beta.shape)
 
         alpha_t = F.softmax(alpha, dim=2)

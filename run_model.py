@@ -13,7 +13,7 @@ import argparse
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from torch.utils.data import Dataset
 
-from model_coam import CoamNN, load_data_coam, init_data_coam
+from model_coam import CoamBetaNN, CoamNN, CoamAlphaNN, load_data_coam, init_data_coam
 from model_retain import RetainNN, load_data_retain, init_data_retain
 
 def parse_arguments(parser):
@@ -159,6 +159,10 @@ if __name__ == "__main__":
         model = RetainNN(params=params).to(params["device"])
     elif params["model"] == 'coam':
         model = CoamNN(params=params).to(params["device"])
+    elif params["model"] == 'coam_alpha':
+        model = CoamAlphaNN(params=params).to(params["device"])
+    elif params["model"] == 'coam_beta':
+        model = CoamBetaNN(params=params).to(params["device"])
     tot = 0
     for p in model.parameters():
         if p.requires_grad:
