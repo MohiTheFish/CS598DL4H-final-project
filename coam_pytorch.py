@@ -129,13 +129,13 @@ class CoamNN(nn.Module):
         d = self.dropout(d)
         p = self.dropout(p)
 
-        d_rnn_output, _ = self.diagnoses_rnn(d)
-        p_rnn_output, _ = self.prescriptions_rnn(p)
+        h, _ = self.diagnoses_rnn(d)
+        g, _ = self.prescriptions_rnn(p)
         # print(d_rnn_output.shape, p_rnn_output.shape)
 
         # Combining operation is unclear
         # com = torch.cat((d, p), 2).permute((2, 0, 1))
-        com = d_rnn_output + p_rnn_output
+        com = h + g
         # print(com.shape)
 
 
@@ -148,8 +148,8 @@ class CoamNN(nn.Module):
 
         # print(alpha_t.shape, beta_t.shape)
 
-        h_t = torch.sum(beta_t*d_rnn_output, dim=0)
-        g_t = torch.sum(alpha_t*p_rnn_output, dim=0)
+        h_t = torch.sum(beta_t*h, dim=0)
+        g_t = torch.sum(alpha_t*g, dim=0)
 
         # print(h_t.shape, g_t.shape)
 
