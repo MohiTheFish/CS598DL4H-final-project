@@ -52,7 +52,7 @@ We recommend saving the files to the following directory
 ```
 data/mimic-iii-clinical-database-1.4
 ```
-### **Note:** We have setup the .gitignore to ignore any files added to the `data` directory other than `process_data.py`. Patient information is highly confidential, and, in an effort to protect the patients' data, we highly recommend using the data directory wherever you are unsure if the information is confidential.
+### **Note:** We have configured the .gitignore to ignore any files added to the `data` directory other than `process_data.py`. Patient information is highly confidential, and, in an effort to protect the patients' data, we highly recommend using the `data` directory wherever you are unsure if the information is confidential.
 
 Once you have the data in the above directory, you can run our `process_data` script*
 ```bash
@@ -71,7 +71,7 @@ This has all of the preprocessed data that we used.
 ## Building our Model
 You can build and train the model and have it be evaluated by simply running 
 ```bash
-python coam_pytorch.py [--save_model OUTPUT_PATH]
+python coam_pytorch.py [--save_model OUTPUT_PATH] [--epochs NUM_EPOCHS] [--batch_size BATCH_SIZE]
 ```
 The script will default to using the files we generated before. It will run for 10 epochs with a batch size of 100. If you choose to save the model, you can evaluate it later by using the load model arg:
 ```bash
