@@ -5,10 +5,10 @@ From Electronic Health Records](https://ieeexplore.ieee.org/document/8761846).
 
 To use this repo, we have the following steps:
 
-1. [Installation](##Installation)
-2. [Processing the Data](##ProcessingtheData)
-3. [Building our Model](##BuildingourModel)
-4. [Other Model](##OtherBaselineModel)
+1. [Installation](#Installation)
+2. [Processing the Data](#processing-the-data)
+3. [Building our Model](#building-our-model)
+4. [Other Model](#other-baseline-model)
 
 ## Installation
 We built this model using Python version 3.9.7.
@@ -95,8 +95,23 @@ Our baseline model is a pytorch implementation of RETAIN. Credit goes to https:/
 python run_model.py --model retain
 ```
 
+## Results
+
+Model | AUC | Precision | Recall | F1Score
+--- | --- | --- | --- | ---
+Retain | 0.7979 | 0.6735 | 0.6735 | 0.6735
+COAM | 0.8386 | 0.7847 | 0.7527 | 0.7620
+COAM_alpha | 0.8043 | 0.6761 | 0.6686 | 0.6723
+COAM_beta | 0.8414 | 0.8046 | 0.7383 | 0.7511
+
 
 ## References/Credits
+Wei Guo, Wei Ge, Lizhen Cui, Hui Li, and Lanju
+Kong. 2019. An interpretable disease onset predic-
+tive model using crossover attention mechanism from
+electronic health records. IEEE Access, 7:134236–
+134244.
+
 https://github.com/easyfan327/Pytorch-RETAIN - The baseline model, and also the base for our COAM model.
 
 
