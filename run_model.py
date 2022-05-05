@@ -10,6 +10,7 @@ import torch
 import numpy as np
 import random
 import argparse
+import time
 from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
 from torch.utils.data import Dataset
 
@@ -183,6 +184,10 @@ if __name__ == "__main__":
         params["n_batches"] = int(np.ceil(float(len(train_set_y)) / float(params["batch_size"])))
         best_test_auc = 0
         best_epoch = 0
+        timeTotal = 0
+        numTimes = 0
+        prevTime = time.perf_counter()
+        currTime = -1 # Initialized before printing
         for epoch in range(params["n_epochs"]):
             model.train()
             loss_vector = trainModel(model, train_set_x, train_set_y, optimizer=optimizer, loss_fn=loss_fn, params=params)
@@ -193,9 +198,15 @@ if __name__ == "__main__":
             if test_auc > best_test_auc:
                 best_test_auc = test_auc
                 best_epoch = epoch
-
-            print("{},{:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, torch.mean(loss_vector), test_auc, p,r,f))
+            
+            currTime = time.perf_counter()
+            elapsed = currTime - prevTime
+            print("{}, {:.4f} \t {:.4f},{:.4f} \t {:.4f},{:.4f},{:.4f}".format(epoch, elapsed, torch.mean(loss_vector), test_auc, p,r,f))
+            timeTotal += elapsed
+            prevTime = currTime
+        
+        avgEpochTime = timeTotal / params["n_epochs"]
 
         if params["save_model"]:
             torch.save(model.state_dict(), params["save_model"])
-        print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
+        print("best auc = {} at epoch {}. Average Time Per Epoch = {}".format(best_test_auc, best_epoch, avgEpochTime))
