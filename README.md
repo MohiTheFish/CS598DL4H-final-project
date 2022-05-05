@@ -1,5 +1,14 @@
 # CS598DL4H-final-project
-Final Project for CS598DL4H at UIUC
+This is our Final Project for CS598DL4H at UIUC. The goal was to reproduce a paper of our choice, related to Deep Learning for Healthcare. We chose the paper: [An Interpretable Disease Onset Predictive Model
+Using Crossover Attention Mechanism
+From Electronic Health Records](https://ieeexplore.ieee.org/document/8761846). 
+
+To use this repo, we have the following steps:
+
+1. [Installation](##Installation)
+2. [Processing the Data](##ProcessingtheData)
+3. [Building our Model](##BuildingourModel)
+4. [Other Model](##OtherBaselineModel)
 
 ## Installation
 We built this model using Python version 3.9.7.
